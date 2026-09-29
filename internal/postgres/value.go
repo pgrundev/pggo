@@ -31,10 +31,9 @@ func AppendValue(b []byte, oid uint32, raw []byte) []byte {
 			return append(b, "true"...)
 		}
 		return append(b, "false"...)
-	case oidInt2, oidInt4, oidInt8, oidOID:
-		return append(b, raw...)
-	case oidFloat4, oidFloat8, oidNumeric:
+	case oidInt2, oidInt4, oidInt8, oidOID, oidFloat4, oidFloat8, oidNumeric:
 		// NaN and ±Infinity have no JSON number form; keep them as strings.
+		// Validating integers too guarantees valid JSON even from a misbehaving server.
 		if isJSONNumber(raw) {
 			return append(b, raw...)
 		}

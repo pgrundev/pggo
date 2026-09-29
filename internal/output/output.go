@@ -62,7 +62,7 @@ func AppendMs(b []byte, ms float64) []byte {
 const hexDigits = "0123456789abcdef"
 
 // AppendString appends s as a JSON string. Unlike encoding/json it does not
-// HTML-escape, keeping output readable; invalid UTF-8 becomes U+FFFD.
+// HTML-escape, keeping output readable; invalid UTF-8 becomes U+FFFD (unescaped).
 func AppendString(b []byte, s string) []byte {
 	b = append(b, '"')
 	start := 0
@@ -94,7 +94,7 @@ func AppendString(b []byte, s string) []byte {
 		if r == utf8.RuneError && size == 1 || r == ' ' || r == ' ' {
 			b = append(b, s[start:i]...)
 			if r == utf8.RuneError {
-				b = append(b, `�`...)
+				b = append(b, "\uFFFD"...) // replacement character, valid UTF-8
 			} else {
 				b = append(b, `\u202`...)
 				b = append(b, hexDigits[r&0xF])

@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -89,7 +90,7 @@ func TestAppendValue(t *testing.T) {
 		{oidNumeric, []byte("0.10"), "0.10"},
 		{oidJSONB, []byte(`{"a":1}`), `{"a":1}`},
 		{25, []byte("a\"b\\c\n\x01<>&"), `"a\"b\\c\n\u0001<>&"`},
-		{25, []byte("\xff"), `"�"`},
+		{25, []byte("\xff"), "\"\uFFFD\""},
 	}
 	for _, c := range cases {
 		if got := string(AppendValue(nil, c.oid, c.raw)); got != c.want {
@@ -114,4 +115,62 @@ func TestSCRAMVector(t *testing.T) {
 	if !s.verifyServer([]byte("v=6rriTRBi23WpRR/wtup+mMhUZUn/dB5nLTJRsjl95G4=")) {
 		t.Fatal("server signature not verified")
 	}
+}
+
+func FuzzMaxPlaceholder(f *testing.F) {
+	for _, s := range []string{"SELECT $1", "'$1'", "$$ $1 $$", "$a$ $1", "/* /* */", "E'\\'", `"$1`, "$99999999999", "--", "$"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		if n := MaxPlaceholder(s); n < 0 || n > 65535 {
+			t.Fatalf("MaxPlaceholder(%q) = %d", s, n)
+		}
+	})
+}
+
+func FuzzParseURL(f *testing.F) {
+	for _, s := range []string{"postgres://u:p@h:5432/db?sslmode=require", "host=h port=1 password='a\\'b'", "postgresql://[::1]:5/x", "a=", "='x'", "postgres://%zz"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		c, err := ParseURL(s)
+		if err == nil && (c.Port <= 0 || c.Port > 65535 || c.SSLMode == "") {
+			t.Fatalf("ParseURL(%q) accepted invalid config %+v", s, c)
+		}
+	})
+}
+
+func FuzzAppendValue(f *testing.F) {
+	for _, oid := range []uint32{oidBool, oidInt4, oidInt8, oidFloat8, oidNumeric, 25} {
+		for _, v := range []string{"1", "-1.5e10", "NaN", "t", "01", "1.", ".5", "-", "1e", "x\"y", "\xff"} {
+			f.Add(oid, []byte(v))
+		}
+	}
+	f.Fuzz(func(t *testing.T, oid uint32, raw []byte) {
+		if oid == oidJSON || oid == oidJSONB {
+			return // embedded verbatim: the server guarantees validity
+		}
+		if b := AppendValue(nil, oid, raw); !json.Valid(b) {
+			t.Fatalf("AppendValue(%d, %q) = %s is not valid JSON", oid, raw, b)
+		}
+	})
+}
+
+func FuzzParseCommandTag(f *testing.F) {
+	for _, s := range []string{"INSERT 0 1", "", " ", "1 2 3", "SELECT 99999999999999999999"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) { ParseCommandTag(s) })
+}
+
+func FuzzParseRowDescription(f *testing.F) {
+	f.Add(rowDescription(Column{"id", 23}, Column{"x", 25}))
+	f.Add([]byte{0, 5, 'a'})
+	f.Fuzz(func(t *testing.T, b []byte) { parseRowDescription(b) })
+}
+
+func FuzzParseError(f *testing.F) {
+	f.Add([]byte("SERROR\x00C42P01\x00Mmissing\x00P15\x00\x00"))
+	f.Add([]byte("C"))
+	f.Fuzz(func(t *testing.T, b []byte) { parseError(b) })
 }

@@ -95,6 +95,11 @@ func (c *Conn) Run(ctx context.Context, req *Request) (*Result, error) {
 	for ready < wantReady {
 		typ, body, err := c.recv()
 		if err != nil {
+			if firstErr != nil {
+				// e.g. FATAL 57P01 followed by the server closing the socket:
+				// the server's error says more than the EOF does.
+				return nil, firstErr
+			}
 			return nil, c.runErr(err)
 		}
 		switch typ {

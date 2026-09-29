@@ -64,8 +64,6 @@ func FromServer(code, message, detail, hint string, position int) *Error {
 		e.Retryable = true
 	case code == "40001", code == "40P01", strings.HasPrefix(code, "53"):
 		e.Retryable = true
-	case code == "25006" && hint == "":
-		e.Hint = "pggo query runs read-only; use `pggo exec` for statements that modify data"
 	}
 	return e
 }

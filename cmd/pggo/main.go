@@ -97,7 +97,7 @@ func run(args []string, start time.Time) ([]byte, error) {
 	case "exec":
 		res, err := conn.Run(ctx, &postgres.Request{SQL: o.sql, Params: o.params})
 		if err != nil {
-			return nil, err
+			return nil, readOnlyHint(err, conn, false)
 		}
 		cmd, n := postgres.ParseCommandTag(res.CommandTag)
 		return output.NewObject().Bool("ok", true).String("command", cmd).Int("rows_affected", n).
@@ -166,7 +166,7 @@ func query(ctx context.Context, conn *postgres.Conn, o *options, start time.Time
 		cols, names = c, columnKeys(c)
 	}
 	if _, err := conn.Run(ctx, req); err != nil {
-		return nil, err
+		return nil, readOnlyHint(err, conn, true)
 	}
 	colJSON := []byte{'['}
 	for i, n := range names {
@@ -190,6 +190,23 @@ func query(ctx context.Context, conn *postgres.Conn, o *options, start time.Time
 		obj.String("truncated_reason", reason).String("hint", hint)
 	}
 	return obj.Ms("duration_ms", msSince(start)).Bytes(), nil
+}
+
+// readOnlyHint explains a 25006 (read_only_sql_transaction) error: either the
+// write went through query's read-only wrapper, or the connection itself is read-only.
+func readOnlyHint(err error, conn *postgres.Conn, isQuery bool) error {
+	e := perr.Classify(err)
+	if e.Code != "25006" || e.Hint != "" {
+		return err
+	}
+	if conn.ServerReadOnly() {
+		e.Hint = "this connection is read-only (hot standby, or default_transaction_read_only=on); writes are not possible here"
+	} else if isQuery {
+		e.Hint = "pggo query runs read-only; use `pggo exec` for statements that modify data"
+	} else {
+		return err
+	}
+	return e
 }
 
 // columnKeys returns JSON-encoded, de-duplicated column names ("id", "id_2", ...).
@@ -251,7 +268,7 @@ func parseArgs(args []string) (*options, error) {
 	noMoreFlags := false
 	for i := 1; i < len(args); i++ {
 		a := args[i]
-		if noMoreFlags || !strings.HasPrefix(a, "--") || a == "-" {
+		if noMoreFlags || !isFlag(a) {
 			pos = append(pos, a)
 			continue
 		}
@@ -422,6 +439,24 @@ func parsePositive(name, s string) (int, error) {
 
 func invalid(format string, args ...any) *perr.Error {
 	return perr.New(perr.InvalidInput, format, args...)
+}
+
+// isFlag reports whether a looks like --name or --name=value. Anything else,
+// such as SQL starting with a "-- comment", is a positional argument.
+func isFlag(a string) bool {
+	if a == "--" {
+		return true
+	}
+	name, _, _ := strings.Cut(strings.TrimPrefix(a, "--"), "=")
+	if !strings.HasPrefix(a, "--") || name == "" {
+		return false
+	}
+	for _, c := range name {
+		if (c < 'a' || c > 'z') && c != '-' {
+			return false
+		}
+	}
+	return true
 }
 
 func isURL(s string) bool {

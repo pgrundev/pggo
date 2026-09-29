@@ -99,6 +99,12 @@ func (c *Conn) ServerVersion() string {
 	return v
 }
 
+// ServerReadOnly reports whether the server said at startup that sessions are
+// read-only (PostgreSQL 14+ reports default_transaction_read_only and in_hot_standby).
+func (c *Conn) ServerReadOnly() bool {
+	return c.params["default_transaction_read_only"] == "on" || c.params["in_hot_standby"] == "on"
+}
+
 // Close sends Terminate and closes the socket.
 func (c *Conn) Close() error {
 	c.nc.SetDeadline(time.Now().Add(100 * time.Millisecond))

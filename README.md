@@ -8,6 +8,7 @@ JSON in, JSON out · structured errors · parameterized by default · always bou
 
 <br>
 
+[![CI](https://github.com/pgrundev/pggo/actions/workflows/ci.yml/badge.svg)](https://github.com/pgrundev/pggo/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/pgrundev/pggo.svg)](https://pkg.go.dev/github.com/pgrundev/pggo)
 [![Go Report Card](https://goreportcard.com/badge/github.com/pgrundev/pggo)](https://goreportcard.com/report/github.com/pgrundev/pggo)
 [![Go](https://img.shields.io/badge/go-1.22+-00ADD8?logo=go&logoColor=white)](https://go.dev)
@@ -140,13 +141,52 @@ Classification is by SQLSTATE, so agents never need to parse messages: `28P01`/`
 ## Tests
 
 ```bash
-make test           # unit tests (placeholder scanner, DSN, SCRAM RFC 7677 vector, value encoding, stats)
+make test           # go vet + unit, protocol and CLI tests (no database needed)
 make test-matrix    # integration suite against PostgreSQL 16, 17, 18, 19beta1 (Docker, TLS on)
 ```
 
-The integration suite (`integration/`) runs the real binary. Every error test checks the full JSON contract: exact key set, `type`, `code`, `retryable` and a non-empty message. It covers ping (ok, refused, bad password, TLS require and verify-full, MD5 and cleartext auth), info, and query results across the types (NULL, bool, ints, int8 > 2^53, float, NaN, numeric, text escaping, timestamp, json/jsonb, uuid, arrays, bytea). It also covers empty results, duplicate columns, parameters (injection strings, NULL through `--params`, placeholders inside literals), exec INSERT/UPDATE/DELETE/DDL, stacked statements, invalid SQL, a missing table, unique/check/not-null violations, lock timeouts (server `lock_timeout`, and `--timeout` while blocked), deadlock, connect timeout (a silent TCP server), statement timeout (checking that the backend is gone afterwards), 100k-row truncation, the byte limit, deterministic output, bench, and invalid input.
+CI (`.github/workflows/ci.yml`) runs the following on every push and pull request. It uses one job per PostgreSQL version.
+- gofmt and vet checks
+- the race detector over the unit tests
+- 15 seconds on each of the 7 fuzz targets
+- the size report
+- the full integration matrix
 
-Result on 2026-09-29: **all pass on 16, 17, 18.6 and 19beta1.**
+**Unit tests** need no database:
+- the placeholder scanner and DSN parser
+- the SCRAM exchange, checked against the RFC 7677 vector
+- value encoding to JSON
+- SQLSTATE classification
+- the JSON writer, including exact error envelopes
+- CLI parsing: every flag, every invalid input, `--` and SQL that starts with a comment, the help JSON documenting every command and flag
+
+**Protocol tests against a scripted fake server** (`internal/postgres/fakeserver_test.go`) cover failures a real server rarely produces on demand. These tests check the bytes pggo sends as well as how it reacts:
+- the exact bytes of the Parse, Bind, Describe and Execute messages, and the read-only pipeline order
+- cleartext, MD5 and SCRAM exchanges, plus SCRAM with a forged signature, a foreign nonce, zero iterations or a bad salt
+- missing passwords and unsupported auth methods (GSS, SSPI, SCRAM-PLUS)
+- SSL refused in each `sslmode`
+- startup errors, and a server that stalls or disconnects during startup
+- malformed and oversized messages
+- the server dying mid-result, or sending FATAL and then closing
+- cancellation: pggo sends a cancel request with the right key, gives up within timeout + grace if the server ignores it, and never sends a spurious cancel
+
+**Fuzzing:** 7 targets. It has already found and fixed one gap: integer columns are now validated, so the output stays valid JSON even if a server or proxy misbehaves.
+
+**Integration tests** (`integration/`) run the real binary against a real server. There are about 120 cases, and every error case checks the full JSON contract (exact key set, `type`, `code`, `retryable`, non-empty message). Coverage:
+- ping: ok, connection refused, bad password, TLS `require`, `verify-ca` with the right and the wrong CA, `verify-full`, MD5 and cleartext auth
+- connection strings: URL, keyword/value form, the `PG*` environment variables, passwords with URL-special characters, URL parameters passed through as session settings, a nonexistent database
+- info
+- about 50 value types: NULL, bool, all integer sizes and their limits, float edge cases (NaN, ±Infinity, -0, exponents), numeric precision, text escaping and emoji, timestamps and ±infinity, json/jsonb, uuid, arrays, bytea, interval, inet, ranges, records, enums, domains, xml
+- result shapes: zero-column results, unicode and duplicate column names, 300 columns, 100 parameters, a 1 MB SQL statement from stdin, parameter round-trips including injection strings
+- read-only enforcement, including data-modifying CTEs, and hints that stay correct on a read-only server
+- exec: INSERT, UPDATE, DELETE, RETURNING, MERGE, VACUUM, CREATE INDEX CONCURRENTLY, DO blocks with notices; stacked statements are rejected
+- errors: invalid SQL, a missing table, constraint violations, lock timeouts, deadlock, a backend terminated mid-query
+- timeouts: connect and statement timeouts (the server-side statement is verified gone afterwards), and timeouts on `exec` and `bench`
+- output limits: truncation at 100,000 rows, the byte limit including a single row larger than it
+- 40 concurrent invocations
+- golden byte-exact output for every command
+
+Result on 2026-09-29: **all pass on PostgreSQL 16, 17, 18.6 and 19beta1**, and the race detector is clean.
 
 ## Agent tests
 
