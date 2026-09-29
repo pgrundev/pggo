@@ -24,16 +24,51 @@ JSON in, JSON out · structured errors · parameterized by default · always bou
 
 ---
 
-One static binary, standard library only (no pgx, no cgo). Every call prints
-exactly one line of JSON. Errors are structured. Values are parameterized.
-Every call has a timeout, and query output has a size limit.
+Tiny PostgreSQL client for AI agents, written in Go.
 
-> **pgx is for humans and applications. pgGo is for agents.**
+**Zero dependencies. One binary. PostgreSQL wire protocol. JSON everywhere.**
 
 ```bash
-$ pggo query "$DATABASE_URL" 'SELECT id, email FROM users WHERE id = $1' --param 42
-{"ok":true,"columns":["id","email"],"rows":[{"id":42,"email":"alex@example.com"}],"row_count":1,"truncated":false,"duration_ms":2.8}
+pggo query "$DATABASE_URL" \
+  'SELECT id, email FROM users WHERE id = $1' \
+  --param 42
 ```
+
+```json
+{"ok":true,"columns":["id","email"],"rows":[{"id":42,"email":"alex@example.com"}],"row_count":1,"truncated":false,"duration_ms":8.5}
+```
+
+Built for agents:
+
+→ deterministic JSON output  
+→ structured PostgreSQL errors + SQLSTATE  
+→ safe parameterized queries  
+→ read-only `query`  
+→ strict timeouts and server-side cancellation  
+→ bounded output by default  
+→ one statement per call  
+→ zero dependencies
+
+### Tiny
+
+~1,800 lines of Go (excluding tests).
+
+```text
+Binary                4.03 MB
+gzip                  1.68 MB
+Peak memory           6.4 MiB
+Connect + SELECT 1    8.5 ms p50
+```
+
+Tested against PostgreSQL 16, 17, 18 and 19 beta.
+
+No pgx.  
+No libpq.  
+No psql parsing.
+
+pgGo speaks the PostgreSQL protocol directly.
+
+> **pgx is for humans and applications. pgGo is for agents.**
 
 ## Build
 
