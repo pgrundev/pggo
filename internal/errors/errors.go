@@ -9,6 +9,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -124,7 +125,7 @@ func Classify(err error) *Error {
 	if stderrors.Is(err, os.ErrNotExist) {
 		return New(Connection, "%v", err)
 	}
-	if err.Error() == "EOF" || strings.Contains(err.Error(), "unexpected EOF") {
+	if stderrors.Is(err, io.EOF) || stderrors.Is(err, io.ErrUnexpectedEOF) {
 		return New(Connection, "server closed the connection unexpectedly")
 	}
 	return New(Protocol, "%v", err)

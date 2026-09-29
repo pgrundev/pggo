@@ -43,6 +43,9 @@ func NewPool(cfg PoolConfig) *Pool {
 	return &Pool{cfg: cfg, sem: make(chan struct{}, cfg.MaxConns)}
 }
 
+// Config returns a copy of the connection configuration the pool dials with.
+func (p *Pool) Config() *Config { return p.cfg.Config.Copy() }
+
 // PoolConn is a connection checked out of a Pool.
 type PoolConn struct {
 	p        *Pool

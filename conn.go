@@ -100,7 +100,7 @@ func ConnectConfig(ctx context.Context, cfg *Config, opts ...Option) (*Conn, err
 			c.nc.Close()
 		}
 		if ctx.Err() != nil && !errors.Is(err, ctx.Err()) {
-			err = fmt.Errorf("%w (%v)", ctx.Err(), err)
+			err = fmt.Errorf("%w: %v", context.Cause(ctx), err)
 		}
 		return nil, &ConnectError{Addr: c.addr, Err: err}
 	}
@@ -116,10 +116,9 @@ func ConnectConfig(ctx context.Context, cfg *Config, opts ...Option) (*Conn, err
 		return fail(err)
 	}
 	c.nc = nc
+	// Interrupt the handshake only once the context is done (not via a socket
+	// deadline equal to ctx's, which can fire first and hide the context error).
 	stop := context.AfterFunc(ctx, func() { c.setDeadline(time.Now()) })
-	if dl, ok := ctx.Deadline(); ok {
-		nc.SetDeadline(dl)
-	}
 	err = c.startup()
 	if !stop() || err != nil {
 		if err == nil {
@@ -128,13 +127,28 @@ func ConnectConfig(ctx context.Context, cfg *Config, opts ...Option) (*Conn, err
 		return fail(err)
 	}
 	c.nc.SetDeadline(time.Time{})
-	for _, s := range cfg.sessionSQL {
+	for _, s := range append(c.requireTextSettings(), cfg.sessionSQL...) {
 		if _, err := c.Exec(ctx, s); err != nil {
 			c.Close()
 			return nil, &ConnectError{Addr: c.addr, Err: err}
 		}
 	}
 	return c, nil
+}
+
+// requireTextSettings returns the SETs needed for pggo's text-format decoding.
+// They are not sent at startup: on most servers the defaults already match
+// (so there is no extra round trip), and a setting pggo does not need to change
+// keeps its server-side source, as with other drivers.
+func (c *Conn) requireTextSettings() []string {
+	var set []string
+	if c.params["client_encoding"] != "UTF8" {
+		set = append(set, "SET client_encoding = 'UTF8'")
+	}
+	if !strings.HasPrefix(c.params["DateStyle"], "ISO") {
+		set = append(set, "SET DateStyle = 'ISO, MDY'")
+	}
+	return set
 }
 
 func (c *Conn) setDeadline(t time.Time) {
@@ -200,15 +214,13 @@ func (c *Conn) startup() error {
 	kv := func(k, v string) { c.w = append(append(append(append(c.w, k...), 0), v...), 0) }
 	kv("user", cfg.User)
 	kv("database", cfg.Database)
-	kv("client_encoding", "UTF8")
-	kv("DateStyle", "ISO, MDY")
 	app := "pggo"
 	for k, v := range cfg.RuntimeParams {
 		switch k {
 		case "application_name":
 			app = v
 		case "client_encoding", "DateStyle":
-			// fixed: result decoding depends on them
+			// fixed (see requireTextSettings): result decoding depends on them
 		default:
 			kv(k, v)
 		}

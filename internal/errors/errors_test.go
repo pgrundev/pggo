@@ -9,6 +9,8 @@ import (
 	"os"
 	"syscall"
 	"testing"
+
+	"github.com/pgrundev/pggo"
 )
 
 func TestFromServer(t *testing.T) {
@@ -79,6 +81,7 @@ func TestClassify(t *testing.T) {
 		{"dns temporary", &net.DNSError{Name: "h", Err: "server misbehaving", IsTemporary: true}, Connection, true},
 		{"eof", io.EOF, Connection, true},
 		{"unexpected eof", io.ErrUnexpectedEOF, Connection, true},
+		{"wrapped eof", &pggo.ConnectError{Addr: "h:5432", Err: io.EOF}, Connection, true},
 		{"closed", net.ErrClosed, Connection, true},
 		{"unknown", stderrors.New("weird"), Protocol, false},
 		{"context deadline wraps", fmt.Errorf("x: %w", os.ErrDeadlineExceeded), Timeout, true},

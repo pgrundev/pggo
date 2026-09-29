@@ -73,6 +73,8 @@ func (f *fakeConn) param(k, v string) { f.send('S', append(cstr(k), cstr(v)...).
 func (f *fakeConn) handshake() {
 	f.authOK()
 	f.param("server_version", "17.2 (Debian 17.2-1.pgdg120+1)")
+	f.param("client_encoding", "UTF8")
+	f.param("DateStyle", "ISO, MDY")
 	f.send('K', append(u32(fakePID), u32(fakeSecret)...)...)
 	f.ready('I')
 }
@@ -261,10 +263,15 @@ func TestFakeStartupParams(t *testing.T) {
 	}
 	defer c.Close()
 	p := <-got
-	for k, v := range map[string]string{"user": "alice", "database": "app", "client_encoding": "UTF8", "DateStyle": "ISO, MDY", "application_name": "myagent", "search_path": "app"} {
+	for k, v := range map[string]string{"user": "alice", "database": "app", "application_name": "myagent", "search_path": "app"} {
 		if p[k] != v {
 			t.Errorf("startup %s = %q, want %q", k, p[k], v)
 		}
+	}
+	// Like pgx, pggo leaves client_encoding/DateStyle to the server when its
+	// defaults already fit, so they keep their server-side source.
+	if _, sent := p["client_encoding"]; sent {
+		t.Error("client_encoding sent at startup")
 	}
 	if c.ServerVersion() != "17.2" {
 		t.Errorf("ServerVersion = %q", c.ServerVersion())
@@ -1009,3 +1016,47 @@ func TestFakeDialFunc(t *testing.T) {
 }
 
 func b64(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
+
+// A stalled handshake must always report context.DeadlineExceeded (never a
+// bare socket timeout that raced ahead of the context).
+func TestFakeConnectDeadlineIsContextError(t *testing.T) {
+	s := startFake(t, 0, func(f *fakeConn) { f.authOK(); time.Sleep(2 * time.Second) })
+	for i := 0; i < 30; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		_, err := ConnectConfig(ctx, s.cfg(t, ""))
+		cancel()
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("attempt %d: %v", i, err)
+		}
+	}
+}
+
+func TestFakeFixesNonUTF8Defaults(t *testing.T) {
+	got := make(chan []string, 1)
+	s := startFake(t, 0, func(f *fakeConn) {
+		f.authOK()
+		f.param("client_encoding", "SQL_ASCII")
+		f.param("DateStyle", "Postgres, DMY")
+		f.ready('I')
+		var sets []string
+		for i := 0; i < 2; i++ {
+			m := f.readUntil('S')
+			sets = append(sets, strings.Split(string(m['P'][0][1:]), "\x00")[0])
+			f.send('1')
+			f.send('2')
+			f.send('n')
+			f.send('C', cstr("SET")...)
+			f.ready('I')
+		}
+		got <- sets
+		f.readUntil('X')
+	})
+	c, err := ConnectConfig(ctxTimeout(t, time.Second), s.cfg(t, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	if sets := <-got; strings.Join(sets, ";") != "SET client_encoding = 'UTF8';SET DateStyle = 'ISO, MDY'" {
+		t.Fatalf("sent %q", sets)
+	}
+}

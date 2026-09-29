@@ -9,7 +9,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Column describes one result column.
@@ -149,10 +148,10 @@ func (c *Conn) appendPending() int {
 }
 
 // watch arms cancellation for one request: when ctx fires, a cancel request
-// is sent and the socket gets a short deadline.
+// is sent and the socket gets a short deadline. (No deadline needs clearing
+// here: a connection whose context fired is closed, never reused.)
 func (c *Conn) watch(ctx context.Context) func() bool {
 	c.canceled.Store(false)
-	c.nc.SetDeadline(time.Time{})
 	return context.AfterFunc(ctx, c.cancelRequest)
 }
 

@@ -20,7 +20,7 @@ JSON in, JSON out · structured errors · parameterized by default · always bou
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/pgrundev/pggo?style=social)](https://github.com/pgrundev/pggo/stargazers)
 
-[Install](#install) · [Commands](#commands) · [Agent contract](#the-agent-contract) · [Tests](#tests) · [Agent tests](#agent-tests) · [Benchmarks](#benchmarks)
+[Install](#install) · [Commands](#commands) · [Go library](#go-library) · [Agent contract](#the-agent-contract) · [Tests](#tests) · [Agent tests](#agent-tests) · [Benchmarks](#benchmarks)
 
 </div>
 
@@ -123,6 +123,57 @@ Unknown URL parameters (e.g. `lock_timeout=2s`) are sent to the server as sessio
 | `--iterations N` | `10` | bench only |
 
 SQL `-` reads the statement from stdin.
+
+## Go library
+
+The CLI is a thin consumer of the `github.com/pgrundev/pggo` package, which you can import directly.
+It has the same zero-dependency core and the same protocol code, but different policies: the library streams any number of rows, and never applies the CLI's 100-row / 64 KB limits.
+
+```go
+conn, err := pggo.Connect(ctx, os.Getenv("DATABASE_URL"),
+	pggo.ReadOnly(), pggo.StatementTimeout(5*time.Second), pggo.LockTimeout(2*time.Second))
+if err != nil {
+	return err
+}
+defer conn.Close()
+
+rows, err := conn.Query(ctx, "SELECT pid, query FROM pg_stat_activity WHERE state <> $1", "idle")
+if err != nil {
+	return err
+}
+defer rows.Close()
+for rows.Next() {
+	var pid int
+	var query *string // nil for NULL
+	if err := rows.Scan(&pid, &query); err != nil {
+		return err
+	}
+}
+if err := rows.Err(); err != nil {
+	return err
+}
+
+var version string
+err = conn.QueryRow(ctx, "SELECT current_setting('server_version')").Scan(&version) // pggo.ErrNoRows if empty
+
+var pgErr *pggo.PgError
+if errors.As(err, &pgErr) {
+	fmt.Println(pgErr.Code) // SQLSTATE, e.g. 42P01
+}
+```
+
+| | |
+|---|---|
+| Connect | `Connect`, `ConnectConfig`, `ParseConfig` (URL, key=value, `PG*` env, service files, `.pgpass`), `Config.DialFunc` (e.g. SSH tunnels), TLS `sslmode`, SCRAM/MD5/cleartext |
+| Run | `Query` (streaming `Rows`: `Next`/`Scan`/`Values`/`RawValues`/`Err`/`Close`), `QueryRow`, `Exec` → `CommandTag.RowsAffected()`, `SimpleQuery`, `Prepare`/`Deallocate`, `MaxRows(n)` |
+| Transactions | `BeginTx(ctx, TxOptions{ReadOnly: true})`, `Commit`, `Rollback`, with `BEGIN` pipelined with the first statement, so the statement can never run outside the transaction |
+| Structs | `CollectStructs[T]`, `CollectOneStruct[T]` (`db:"col"` tags), `CollectStructsByPos[T]` |
+| Types | `bool`, `int2/4/8`, `oid`, `float4/8`, `numeric`, text types, `timestamptz`/`timestamp`/`date`, `json`/`jsonb`, `bytea`, arrays of text/int/oid; NULL through pointers. **Any other type** scans into `*string` or `*pggo.RawValue`, so an unknown OID is never fatal |
+| Cancellation | every call takes a `context.Context`; on expiry pggo sends a cancel request, stops waiting, and closes the connection so it can never be reused in an unknown state |
+| Pool | a deliberately minimal `Pool` (`MaxConns`, `MaxConnLifetime`, `AfterConnect`, `BeforeClose`) |
+
+pgGo's first real application is [PgBot](https://github.com/pgrundev/pgbot), which runs entirely on this library.
+[docs/pgbot-compatibility.md](docs/pgbot-compatibility.md) lists every PostgreSQL feature PgBot uses and how pgGo covers it. Anything PgBot doesn't use (COPY, LISTEN/NOTIFY, `database/sql`, batch, binary format) is intentionally absent.
 
 ## The agent contract
 
@@ -246,24 +297,25 @@ How to read this:
 
 **On the ~1 MB target:** it was not reached. 1.6–1.8 MB gzipped (`make size`) is the practical floor for a Go binary that includes `crypto/tls`. The Go runtime and TLS/x509 make up almost all of it; pggo's own code is about 32 KB. Dropping TLS would get close to 1 MB, but TLS is required for nearly every hosted PostgreSQL, so it stays.
 
-## Scope and limitations (v0.0.1)
+## Scope and limitations
 
 - Auth: SCRAM-SHA-256, MD5, cleartext (all three covered by integration tests). There is no channel binding (`SCRAM-SHA-256-PLUS`), GSSAPI or client certificates.
 - Parameters use server-side type inference. If a type is ambiguous (`SELECT $1`), you get text, or a `42P18` error; cast with `$1::int`.
 - Arrays, ranges, intervals etc. come back as PostgreSQL text strings.
 - `exec` returns no rows, so use `query` for `RETURNING`, and note that `query` is read-only. For v0.0.1, `INSERT … RETURNING` reports `rows_affected` only.
-- Not included on purpose: ORM, migrations, pooling, schema tools, MCP, interactive shell.
+- Not included on purpose: ORM, migrations, a general-purpose pool, schema tools, MCP, interactive shell, COPY, LISTEN/NOTIFY, `database/sql`.
 
 ## Layout
 
 ```
-cmd/pggo/            CLI, argument parsing, JSON help
-internal/postgres/   wire protocol: startup, TLS, auth (SCRAM/MD5), extended query, cancel, value → JSON
-internal/errors/     the error contract and SQLSTATE classification
-internal/output/     deterministic JSON writer
+*.go (root)          the pggo library: config, conn (startup/TLS/auth/cancel), query/rows, tx, types, collect, pool
+cmd/pggo/            CLI: argument parsing, placeholder checks, JSON help — a consumer of the library
+internal/errors/     the CLI's error contract and SQLSTATE classification
+internal/output/     deterministic JSON writer and value → JSON for the CLI
 internal/bench/      pggo bench
 integration/         black-box tests against real PostgreSQL
 agent_tests/         LLM usability suite
+docs/                PgBot compatibility audit
 benchmarks/          pgx baseline + comparison runner (separate go.mod, so pggo itself has zero deps)
 scripts/             pg-up/pg-down (Docker PG 16–19), test matrix, bench
 ```
