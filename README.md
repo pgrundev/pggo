@@ -1,10 +1,34 @@
-# pgGo
+<div align="center">
 
-**pgGo is a tiny, fast PostgreSQL adapter designed for LLMs and coding agents.**
+# 🐘 pgGo
+
+**A tiny, fast PostgreSQL adapter designed for LLMs and coding agents.**
+
+JSON in, JSON out · structured errors · parameterized by default · always bounded
+
+<br>
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/pgrundev/pggo.svg)](https://pkg.go.dev/github.com/pgrundev/pggo)
+[![Go Report Card](https://goreportcard.com/badge/github.com/pgrundev/pggo)](https://goreportcard.com/report/github.com/pgrundev/pggo)
+[![Go](https://img.shields.io/badge/go-1.22+-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%7C%2017%20%7C%2018%20%7C%2019beta-4169E1?logo=postgresql&logoColor=white)](#tests)
+<br>
+[![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](go.mod)
+[![Binary size](https://img.shields.io/badge/binary-4.0%20MB%20%C2%B7%201.7%20MB%20gzip-blue)](#benchmarks)
+[![Agent tests](https://img.shields.io/badge/agent%20tests-Sonnet%206%2F6-8A2BE2)](#agent-tests)
+[![GitHub stars](https://img.shields.io/github/stars/pgrundev/pggo?style=social)](https://github.com/pgrundev/pggo/stargazers)
+
+[Commands](#commands) · [Agent contract](#the-agent-contract) · [Tests](#tests) · [Agent tests](#agent-tests) · [Benchmarks](#benchmarks)
+
+</div>
+
+---
 
 One static binary, standard library only (no pgx, no cgo). Every call prints
 exactly one line of JSON. Errors are structured. Values are parameterized.
 Every call has a timeout, and query output has a size limit.
+
+> **pgx is for humans and applications. pgGo is for agents.**
 
 ```bash
 $ pggo query "$DATABASE_URL" 'SELECT id, email FROM users WHERE id = $1' --param 42
