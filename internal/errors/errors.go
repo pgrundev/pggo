@@ -6,12 +6,15 @@
 package errors
 
 import (
+	"context"
 	stderrors "errors"
 	"fmt"
 	"net"
 	"os"
 	"strings"
 	"syscall"
+
+	"github.com/pgrundev/pggo"
 )
 
 // Error types. This set is part of the public contract; do not rename.
@@ -73,6 +76,33 @@ func Classify(err error) *Error {
 	var pe *Error
 	if stderrors.As(err, &pe) {
 		return pe
+	}
+	// Server errors first: a canceled statement is both a context error and a
+	// *PgError (57014), and the SQLSTATE is the more useful of the two.
+	var pg *pggo.PgError
+	if stderrors.As(err, &pg) {
+		return FromServer(pg.Code, pg.Message, pg.Detail, pg.Hint, pg.Position)
+	}
+	if stderrors.Is(err, context.DeadlineExceeded) || stderrors.Is(err, context.Canceled) {
+		return New(Timeout, "operation timed out")
+	}
+	var authErr *pggo.AuthError
+	if stderrors.As(err, &authErr) {
+		return &Error{Type: Authentication, Message: authErr.Err.Error()}
+	}
+	var tlsErr *pggo.TLSError
+	if stderrors.As(err, &tlsErr) {
+		if stderrors.Is(err, os.ErrNotExist) || strings.Contains(tlsErr.Error(), "sslrootcert") {
+			return New(InvalidInput, "%v", tlsErr)
+		}
+		return &Error{Type: Connection, Message: tlsErr.Error(), Retryable: false}
+	}
+	var protoErr *pggo.ProtocolError
+	if stderrors.As(err, &protoErr) {
+		return New(Protocol, "%s", protoErr.Msg)
+	}
+	if stderrors.Is(err, pggo.ErrConnClosed) {
+		return New(Connection, "connection closed")
 	}
 	var ne net.Error
 	if stderrors.Is(err, os.ErrDeadlineExceeded) || (stderrors.As(err, &ne) && ne.Timeout()) {

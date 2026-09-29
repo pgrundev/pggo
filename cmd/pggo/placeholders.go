@@ -1,4 +1,4 @@
-package postgres
+package main
 
 // MaxPlaceholder returns the highest $N placeholder in sql, skipping string
 // literals, quoted identifiers, dollar-quoted strings, and comments.

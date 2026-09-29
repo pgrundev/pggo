@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -23,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pgrundev/pggo/internal/postgres"
+	pg "github.com/pgrundev/pggo"
 )
 
 var (
@@ -505,15 +506,11 @@ func TestConstraintViolations(t *testing.T) {
 	wantErr(t, pggo(t, "exec", baseURL, "INSERT INTO it_c VALUES ($1, NULL)", "--param", "3"), "postgres_error", "23502", false)
 }
 
-func connect(t *testing.T) *postgres.Conn {
+func connect(t *testing.T) *pg.Conn {
 	t.Helper()
-	cfg, err := postgres.ParseURL(baseURL)
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	c, err := postgres.Connect(ctx, cfg)
+	c, err := pg.Connect(ctx, baseURL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -521,10 +518,10 @@ func connect(t *testing.T) *postgres.Conn {
 	return c
 }
 
-func run(t *testing.T, c *postgres.Conn, sql string) error {
+func run(t *testing.T, c *pg.Conn, sql string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, err := c.Run(ctx, &postgres.Request{SQL: sql})
+	_, err := c.Exec(ctx, sql)
 	return err
 }
 
@@ -555,7 +552,7 @@ func TestLockTimeout(t *testing.T) {
 func TestDeadlock(t *testing.T) {
 	setup(t, "DROP TABLE IF EXISTS it_dl", "CREATE TABLE it_dl (id int PRIMARY KEY, v int)", "INSERT INTO it_dl VALUES (1, 0), (2, 0)")
 	a, b := connect(t), connect(t)
-	for _, c := range []*postgres.Conn{a, b} {
+	for _, c := range []*pg.Conn{a, b} {
 		if err := run(t, c, "BEGIN"); err != nil {
 			t.Fatal(err)
 		}
@@ -584,7 +581,8 @@ func TestDeadlock(t *testing.T) {
 	if got == nil {
 		t.Fatal("expected a deadlock error")
 	}
-	if s := got.Error(); !strings.Contains(s, "40P01") || !strings.HasPrefix(s, "postgres_error") {
+	var pg *pg.PgError
+	if !errors.As(got, &pg) || pg.Code != "40P01" {
 		t.Fatalf("got %v", got)
 	}
 }

@@ -1,8 +1,4 @@
-package postgres
-
-import (
-	"github.com/pgrundev/pggo/internal/output"
-)
+package output
 
 // Type OIDs that map to native JSON values. Everything else is a JSON string
 // holding PostgreSQL's text representation.
@@ -40,7 +36,7 @@ func AppendValue(b []byte, oid uint32, raw []byte) []byte {
 	case oidJSON, oidJSONB:
 		return append(b, raw...)
 	}
-	return output.AppendString(b, string(raw))
+	return AppendString(b, string(raw))
 }
 
 func isJSONNumber(s []byte) bool {

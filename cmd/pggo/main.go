@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,10 +14,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pgrundev/pggo"
 	"github.com/pgrundev/pggo/internal/bench"
 	perr "github.com/pgrundev/pggo/internal/errors"
 	"github.com/pgrundev/pggo/internal/output"
-	"github.com/pgrundev/pggo/internal/postgres"
 )
 
 const version = "0.0.1"
@@ -60,101 +61,146 @@ func run(args []string, start time.Time) ([]byte, error) {
 	case "version":
 		return output.NewObject().Bool("ok", true).String("version", version).Bytes(), nil
 	}
-	cfg, err := postgres.ParseURL(o.url)
+	cfg, err := pggo.ParseConfig(o.url)
 	if err != nil {
-		return nil, err
+		return nil, perr.New(perr.InvalidInput, "%s", strings.TrimPrefix(err.Error(), "pggo: "))
 	}
-	cfg.Timeout = o.timeout
 	ctx, cancel := context.WithTimeout(context.Background(), o.timeout)
 	defer cancel()
 
 	if o.cmd == "bench" {
 		r, err := bench.Run(ctx, cfg, o.iterations)
 		if err != nil {
-			return nil, err
+			return nil, describe(err, o)
 		}
 		return output.NewObject().Bool("ok", true).Int("iterations", int64(o.iterations)).
 			Raw("connect_ms", r.Connect.JSON()).Raw("select1_ms", r.Query.JSON()).
 			Ms("duration_ms", msSince(start)).Bytes(), nil
 	}
 
-	conn, err := postgres.Connect(ctx, cfg)
+	conn, err := pggo.ConnectConfig(ctx, cfg)
 	if err != nil {
-		return nil, err
+		return nil, describe(err, o)
 	}
 	defer conn.Close()
 
+	var out []byte
 	switch o.cmd {
 	case "ping":
-		if _, err := conn.Run(ctx, &postgres.Request{SQL: "SELECT 1"}); err != nil {
-			return nil, err
+		if _, err = conn.Exec(ctx, "SELECT 1"); err == nil {
+			out = output.NewObject().Bool("ok", true).Ms("latency_ms", msSince(start)).Bytes()
 		}
-		return output.NewObject().Bool("ok", true).Ms("latency_ms", msSince(start)).Bytes(), nil
 	case "info":
-		return info(ctx, conn)
+		out, err = info(ctx, conn)
 	case "query":
-		return query(ctx, conn, o, start)
+		out, err = query(ctx, conn, o, start)
+		err = readOnlyHint(err, conn, true)
 	case "exec":
-		res, err := conn.Run(ctx, &postgres.Request{SQL: o.sql, Params: o.params})
-		if err != nil {
-			return nil, readOnlyHint(err, conn, false)
+		var tag pggo.CommandTag
+		if tag, err = conn.Exec(ctx, o.sql, o.args()...); err == nil {
+			out = output.NewObject().Bool("ok", true).String("command", tag.Command()).Int("rows_affected", tag.RowsAffected()).
+				Ms("duration_ms", msSince(start)).Bytes()
 		}
-		cmd, n := postgres.ParseCommandTag(res.CommandTag)
-		return output.NewObject().Bool("ok", true).String("command", cmd).Int("rows_affected", n).
-			Ms("duration_ms", msSince(start)).Bytes(), nil
+		err = readOnlyHint(err, conn, false)
+	default:
+		return nil, perr.New(perr.InvalidInput, "unknown command %q", o.cmd)
 	}
-	return nil, perr.New(perr.InvalidInput, "unknown command %q", o.cmd)
+	if err != nil {
+		return nil, describe(err, o)
+	}
+	return out, nil
 }
 
-func info(ctx context.Context, conn *postgres.Conn) ([]byte, error) {
-	var vals []string
-	_, err := conn.Run(ctx, &postgres.Request{
-		SQL: "SELECT current_database(), current_user, " +
-			"(pg_is_in_recovery() OR current_setting('default_transaction_read_only') = 'on')::text",
-		OnRow: func(v [][]byte) {
-			for _, b := range v {
-				vals = append(vals, string(b))
-			}
-		},
-	})
+// args converts --param values to query arguments (nil = NULL).
+func (o *options) args() []any {
+	a := make([]any, len(o.params))
+	for i, p := range o.params {
+		if p != nil {
+			a[i] = *p
+		}
+	}
+	return a
+}
+
+// describe turns library errors into the CLI's error contract, adding the
+// details an agent needs (which address, which timeout).
+func describe(err error, o *options) error {
+	if err == nil {
+		return nil
+	}
+	e := perr.Classify(err)
+	var ce *pggo.ConnectError
+	var tlsErr *pggo.TLSError
+	isConnect := errors.As(err, &ce) && !errors.As(err, &tlsErr)
+	switch {
+	case e.Type == perr.Timeout && isConnect && e.Code == "":
+		e.Message = fmt.Sprintf("could not connect to %s within %s", ce.Addr, o.timeout)
+	case e.Type == perr.Timeout && e.Code == "57014" && errors.Is(err, context.DeadlineExceeded):
+		e.Message = fmt.Sprintf("statement canceled: exceeded timeout of %s", o.timeout)
+	case e.Type == perr.Timeout && e.Code == "":
+		e.Message = fmt.Sprintf("no response from server within timeout of %s", o.timeout)
+	case e.Type == perr.Connection && isConnect && e.Code == "":
+		cause := err
+		for u := errors.Unwrap(cause); u != nil; u = errors.Unwrap(cause) {
+			cause = u
+		}
+		e.Message = fmt.Sprintf("could not connect to %s: %v", ce.Addr, cause)
+	}
+	return e
+}
+
+func info(ctx context.Context, conn *pggo.Conn) ([]byte, error) {
+	var db, user string
+	var readOnly bool
+	err := conn.QueryRow(ctx, "SELECT current_database(), current_user, "+
+		"pg_is_in_recovery() OR current_setting('default_transaction_read_only') = 'on'").Scan(&db, &user, &readOnly)
 	if err != nil {
 		return nil, err
 	}
-	if len(vals) != 3 {
-		return nil, perr.New(perr.Protocol, "unexpected info result")
-	}
 	return output.NewObject().Bool("ok", true).String("postgres_version", conn.ServerVersion()).
-		String("database", vals[0]).String("user", vals[1]).Bool("read_only", vals[2] == "true").Bytes(), nil
+		String("database", db).String("user", user).Bool("read_only", readOnly).Bytes(), nil
 }
 
-func query(ctx context.Context, conn *postgres.Conn, o *options, start time.Time) ([]byte, error) {
+// query runs the statement in a read-only transaction and renders at most
+// maxRows rows / maxBytes of JSON. The server is asked for maxRows+1 rows
+// (a portal limit), so a huge result is never computed past that. The
+// transaction is never committed: closing the session rolls it back.
+func query(ctx context.Context, conn *pggo.Conn, o *options, start time.Time) ([]byte, error) {
+	tx, err := conn.BeginTx(ctx, pggo.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	rs, err := tx.Query(ctx, o.sql, append(o.args(), pggo.MaxRows(o.maxRows+1))...)
+	if err != nil {
+		return nil, err
+	}
+	defer rs.Close()
+	cols := rs.Columns()
+	names := columnKeys(cols)
 	var (
 		rows      = []byte{'['}
 		count     int
 		received  int
 		byteLimit bool
-		cols      []postgres.Column
 		rowBuf    []byte
-		names     [][]byte
 	)
-	req := &postgres.Request{SQL: o.sql, Params: o.params, ReadOnly: true, MaxRows: o.maxRows + 1}
-	req.OnRow = func(vals [][]byte) {
+	for rs.Next() {
 		received++
 		if count >= o.maxRows || byteLimit {
-			return
+			continue
 		}
 		rowBuf = append(rowBuf[:0], '{')
-		for i, v := range vals {
+		for i, v := range rs.RawValues() {
 			if i > 0 {
 				rowBuf = append(rowBuf, ',')
 			}
 			rowBuf = append(append(rowBuf, names[i]...), ':')
-			rowBuf = postgres.AppendValue(rowBuf, cols[i].Type, v)
+			rowBuf = output.AppendValue(rowBuf, cols[i].TypeOID, v)
 		}
 		rowBuf = append(rowBuf, '}')
 		if len(rows)+len(rowBuf) > o.maxBytes {
 			byteLimit = true
-			return
+			continue
 		}
 		if count > 0 {
 			rows = append(rows, ',')
@@ -162,11 +208,8 @@ func query(ctx context.Context, conn *postgres.Conn, o *options, start time.Time
 		rows = append(rows, rowBuf...)
 		count++
 	}
-	req.OnColumns = func(c []postgres.Column) {
-		cols, names = c, columnKeys(c)
-	}
-	if _, err := conn.Run(ctx, req); err != nil {
-		return nil, readOnlyHint(err, conn, true)
+	if err := rs.Err(); err != nil {
+		return nil, err
 	}
 	colJSON := []byte{'['}
 	for i, n := range names {
@@ -194,12 +237,13 @@ func query(ctx context.Context, conn *postgres.Conn, o *options, start time.Time
 
 // readOnlyHint explains a 25006 (read_only_sql_transaction) error: either the
 // write went through query's read-only wrapper, or the connection itself is read-only.
-func readOnlyHint(err error, conn *postgres.Conn, isQuery bool) error {
-	e := perr.Classify(err)
-	if e.Code != "25006" || e.Hint != "" {
+func readOnlyHint(err error, conn *pggo.Conn, isQuery bool) error {
+	var pg *pggo.PgError
+	if err == nil || !errors.As(err, &pg) || pg.Code != "25006" || pg.Hint != "" {
 		return err
 	}
-	if conn.ServerReadOnly() {
+	e := perr.Classify(err)
+	if conn.ParameterStatus("default_transaction_read_only") == "on" || conn.ParameterStatus("in_hot_standby") == "on" {
 		e.Hint = "this connection is read-only (hot standby, or default_transaction_read_only=on); writes are not possible here"
 	} else if isQuery {
 		e.Hint = "pggo query runs read-only; use `pggo exec` for statements that modify data"
@@ -210,7 +254,7 @@ func readOnlyHint(err error, conn *postgres.Conn, isQuery bool) error {
 }
 
 // columnKeys returns JSON-encoded, de-duplicated column names ("id", "id_2", ...).
-func columnKeys(cols []postgres.Column) [][]byte {
+func columnKeys(cols []pggo.Column) [][]byte {
 	keys := make([][]byte, len(cols))
 	seen := map[string]bool{}
 	for i, c := range cols {
@@ -367,7 +411,7 @@ func parseArgs(args []string) (*options, error) {
 }
 
 func checkPlaceholders(sql string, n int) error {
-	max := postgres.MaxPlaceholder(sql)
+	max := MaxPlaceholder(sql)
 	switch {
 	case max == n:
 		return nil

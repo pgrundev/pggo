@@ -21,8 +21,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/pgrundev/pggo/internal/postgres"
 )
 
 func TestBackendTerminatedMidQuery(t *testing.T) {
@@ -32,11 +30,9 @@ func TestBackendTerminatedMidQuery(t *testing.T) {
 	c := connect(t)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		n := 0
-		_, err := c.Run(context.Background(), &postgres.Request{
-			SQL:   "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'pggo_victim' AND state = 'active'",
-			OnRow: func([][]byte) { n++ },
-		})
+		var n int
+		err := c.QueryRow(context.Background(),
+			"SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE application_name = 'pggo_victim' AND state = 'active'").Scan(&n)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -3,11 +3,12 @@ package bench
 
 import (
 	"context"
+
+	"github.com/pgrundev/pggo"
 	"sort"
 	"time"
 
 	"github.com/pgrundev/pggo/internal/output"
-	"github.com/pgrundev/pggo/internal/postgres"
 )
 
 // Stats summarizes a set of samples in milliseconds.
@@ -44,30 +45,29 @@ type Result struct {
 func since(t time.Time) float64 { return float64(time.Since(t).Nanoseconds()) / 1e6 }
 
 // Run opens n connections and runs n SELECT 1 round trips on a warm connection.
-func Run(ctx context.Context, cfg *postgres.Config, n int) (*Result, error) {
+func Run(ctx context.Context, cfg *pggo.Config, n int) (*Result, error) {
 	connect := make([]float64, 0, n)
 	for i := 0; i < n; i++ {
 		t := time.Now()
-		c, err := postgres.Connect(ctx, cfg)
+		c, err := pggo.ConnectConfig(ctx, cfg)
 		if err != nil {
 			return nil, err
 		}
 		connect = append(connect, since(t))
 		c.Close()
 	}
-	c, err := postgres.Connect(ctx, cfg)
+	c, err := pggo.ConnectConfig(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
 	defer c.Close()
-	req := &postgres.Request{SQL: "SELECT 1", OnRow: func([][]byte) {}}
-	if _, err := c.Run(ctx, req); err != nil { // warm-up
+	if _, err := c.Exec(ctx, "SELECT 1"); err != nil { // warm-up
 		return nil, err
 	}
 	query := make([]float64, 0, n)
 	for i := 0; i < n; i++ {
 		t := time.Now()
-		if _, err := c.Run(ctx, req); err != nil {
+		if _, err := c.Exec(ctx, "SELECT 1"); err != nil {
 			return nil, err
 		}
 		query = append(query, since(t))

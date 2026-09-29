@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pgrundev/pggo"
 	perr "github.com/pgrundev/pggo/internal/errors"
-	"github.com/pgrundev/pggo/internal/postgres"
 )
 
 const url = "postgres://u:p@h/db"
@@ -243,7 +243,7 @@ func TestRunWithoutDatabase(t *testing.T) {
 }
 
 func TestColumnKeys(t *testing.T) {
-	cols := []postgres.Column{{Name: "id"}, {Name: "id"}, {Name: "id_2"}, {Name: "?column?"}, {Name: "é \"q\""}, {Name: "id"}}
+	cols := []pggo.Column{{Name: "id"}, {Name: "id"}, {Name: "id_2"}, {Name: "?column?"}, {Name: "é \"q\""}, {Name: "id"}}
 	var got []string
 	for _, k := range columnKeys(cols) {
 		var s string
