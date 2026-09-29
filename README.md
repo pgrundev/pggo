@@ -17,9 +17,10 @@ JSON in, JSON out · structured errors · parameterized by default · always bou
 [![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](go.mod)
 [![Binary size](https://img.shields.io/badge/binary-4.0%20MB%20%C2%B7%201.7%20MB%20gzip-blue)](#benchmarks)
 [![Agent tests](https://img.shields.io/badge/agent%20tests-Sonnet%206%2F6-8A2BE2)](#agent-tests)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/pgrundev/pggo?style=social)](https://github.com/pgrundev/pggo/stargazers)
 
-[Commands](#commands) · [Agent contract](#the-agent-contract) · [Tests](#tests) · [Agent tests](#agent-tests) · [Benchmarks](#benchmarks)
+[Install](#install) · [Commands](#commands) · [Agent contract](#the-agent-contract) · [Tests](#tests) · [Agent tests](#agent-tests) · [Benchmarks](#benchmarks)
 
 </div>
 
@@ -81,6 +82,14 @@ No psql parsing.
 pgGo speaks the PostgreSQL protocol directly.
 
 > **pgx is for humans and applications. pgGo is for agents.**
+
+## Install
+
+```bash
+go install github.com/pgrundev/pggo/cmd/pggo@latest
+```
+
+Or download a prebuilt binary for Linux or macOS (amd64/arm64) from [Releases](https://github.com/pgrundev/pggo/releases).
 
 ## Build
 
