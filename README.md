@@ -35,10 +35,19 @@ pggo query "$DATABASE_URL" \
 ```
 
 ```json
-{"ok":true,"columns":["id","email"],
- "rows":[{"id":42,"email":"alex@example.com"}],
- "row_count":1,"truncated":false,"duration_ms":8.5}
+{
+  "ok": true,
+  "columns": ["id", "email"],
+  "rows": [
+    { "id": 42, "email": "alex@example.com" }
+  ],
+  "row_count": 1,
+  "truncated": false,
+  "duration_ms": 8.5
+}
 ```
+
+<sub>Pretty-printed here for reading. pggo prints each response as a single JSON line.</sub>
 
 Built for agents:
 
