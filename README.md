@@ -35,7 +35,9 @@ pggo query "$DATABASE_URL" \
 ```
 
 ```json
-{"ok":true,"columns":["id","email"],"rows":[{"id":42,"email":"alex@example.com"}],"row_count":1,"truncated":false,"duration_ms":8.5}
+{"ok":true,"columns":["id","email"],
+ "rows":[{"id":42,"email":"alex@example.com"}],
+ "row_count":1,"truncated":false,"duration_ms":8.5}
 ```
 
 Built for agents:
