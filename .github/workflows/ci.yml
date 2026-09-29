@@ -13,6 +13,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: false # zero dependencies, nothing to cache
       - run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - run: go vet ./...
       - run: go test -race -count=1 ./internal/... ./cmd/...
@@ -36,5 +37,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: false # zero dependencies, nothing to cache
       - name: Integration tests on PostgreSQL ${{ matrix.postgres }}
         run: scripts/test-matrix.sh ${{ matrix.postgres }}
