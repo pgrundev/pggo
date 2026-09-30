@@ -16,13 +16,14 @@ jobs:
           cache: false # zero dependencies, nothing to cache
       - run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - run: go vet ./...
-      - run: go test -race -count=1 ./internal/... ./cmd/...
+      - run: go test -race -count=1 . ./internal/... ./cmd/...
       - name: Fuzz (short)
         run: |
-          for f in FuzzMaxPlaceholder FuzzParseURL FuzzAppendValue FuzzParseCommandTag FuzzParseRowDescription FuzzParseError; do
-            go test -run='^$' -fuzz="^$f\$" -fuzztime=15s ./internal/postgres
-          done
-          go test -run='^$' -fuzz='^FuzzAppendString$' -fuzztime=15s ./internal/output
+          fuzz() { go test -run='^$' -fuzz="^$1\$" -fuzztime=15s "$2"; }
+          for f in FuzzParseConfig FuzzCommandTag FuzzParseRowDescription FuzzParseError; do fuzz $f .; done
+          fuzz FuzzMaxPlaceholder ./cmd/pggo
+          fuzz FuzzAppendValue ./internal/output
+          fuzz FuzzAppendString ./internal/output
       - name: Binary size
         run: make size
 
