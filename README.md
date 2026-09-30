@@ -28,6 +28,16 @@ JSON in, JSON out · structured errors · parameterized by default · always bou
 
 ### Install
 
+Try it without installing anything:
+
+```bash
+$ DATABASE_URL=postgres://user:pass@localhost:5432/db \
+    go run github.com/pgrundev/pggo/examples/hello@latest
+✓ connected to PostgreSQL 18.4
+✓ SELECT 1 → 1
+✓ 8.2 ms
+```
+
 ```bash
 # CLI
 go install github.com/pgrundev/pggo/cmd/pggo@latest
@@ -362,6 +372,7 @@ internal/bench/      pggo bench
 integration/         black-box tests against real PostgreSQL
 agent_tests/         LLM usability suite
 docs/                PgBot compatibility audit
+examples/hello/      go run github.com/pgrundev/pggo/examples/hello@latest
 benchmarks/          pgx baseline + comparison runner (separate go.mod, so pggo itself has zero deps)
 scripts/             pg-up/pg-down (Docker PG 16–19), test matrix, bench
 ```
