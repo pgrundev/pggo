@@ -26,6 +26,20 @@ JSON in, JSON out · structured errors · parameterized by default · always bou
 
 ---
 
+### Install
+
+```bash
+# CLI
+go install github.com/pgrundev/pggo/cmd/pggo@latest
+
+# Go library
+go get github.com/pgrundev/pggo@latest
+```
+
+Requires Go 1.22+. Or download a prebuilt binary (Linux/macOS, amd64/arm64) from [Releases](https://github.com/pgrundev/pggo/releases). Note the org is **`pgrundev`**; `github.com/pgrun/pggo` does not exist.
+
+---
+
 Tiny PostgreSQL client for AI agents, written in Go.
 
 **Zero dependencies. One binary. PostgreSQL wire protocol. JSON everywhere.**
