@@ -92,11 +92,11 @@ PgBot keeps its own ordered pin list (four pins, plus `stats_fetch_consistency` 
 - Fake-server protocol tests cover everything the unit and fuzz layers can reach, with the race detector clean.
 
 **PgBot on pgGo:**
-- Its unit and integration suites pass on PostgreSQL 16–19, over TLS with SCRAM.
+- Its unit and integration suites pass on PostgreSQL 13, 14, 15, 16, 17, 18 and 19, over TLS (SCRAM auth; MD5 on 13's default).
 - The previously skipped pooler tests pass through a real PgBouncer 1.25 (transaction mode) and PgDog, with pgbench write load.
 - No test was weakened. Test fixtures that sent several statements in one `Exec` (a pgx simple-protocol behavior) now use `SimpleQuery` explicitly.
 
-**Real commands, side by side.** The pgx build and the pgGo build were each run against the same live databases: PG 16/17/18/19, a streaming PG 18 standby, PgBouncer and PgDog. The commands were `inspect` (JSON and text), `activity`, `queries`, `indexes`, `tables`, `vacuum`, `waits`, `erd`, `lint`, `tune`, `logs`, `advise`, and MCP `schema_of`/`explain_plan`/`vacuum_health`. Each target and command ran pgx, then pgGo, then pgx again, so that live-counter noise could be separated from real differences.
+**Real commands, side by side.** The pgx build and the pgGo build were each run against the same live databases: PG 13 through 19, a streaming PG 18 standby, PgBouncer and PgDog. The commands were `inspect` (JSON and text), `activity`, `queries`, `indexes`, `tables`, `vacuum`, `waits`, `erd`, `lint`, `tune`, `logs`, `advise`, and MCP `schema_of`/`explain_plan`/`vacuum_health`. Each target and command ran pgx, then pgGo, then pgx again, so that live-counter noise could be separated from real differences.
 - Every command except `inspect` produced identical output on every target.
 - `inspect` differs only where PgBot observes its **own** traffic on an otherwise idle database. pgGo needs fewer round trips (the BEGIN is pipelined), so PgBot's own commits are mostly not yet flushed to `pg_stat_database` when the sample window closes. Under a rate-limited 200 TPS pgbench workload, the pgx build reported about 220 TPS and the pgGo build about 200. Cache-hit and rollback ratios were identical, and the text summary was otherwise identical.
 - One real difference was found and fixed in pgGo. pgGo used to send `client_encoding`/`DateStyle` at startup, which changed their `pg_settings.source`, so PgBot's settings collector dropped `client_encoding` from its overrides list. pgGo now leaves them to the server when the defaults already fit (as pgx does), and sets them only otherwise.
@@ -105,3 +105,5 @@ PgBot keeps its own ordered pin list (four pins, plus `stats_fetch_consistency` 
 - PgBot's binary went from 26.9 MB to 21.8 MB.
 - Across 93 PgBot integration tests, run sequentially, total time went from 45.5 s to 14.8 s.
 - The pggo CLI: interleaved A/B runs against v0.0.1 show warm SELECT 1 and process connect + SELECT 1 within noise, peak RSS 6.4 MiB (unchanged), and the binary at 4.10 MB (+1.7%).
+
+**Agent tests** (Claude Sonnet, CLI on the library core): 6/6.

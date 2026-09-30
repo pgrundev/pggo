@@ -302,7 +302,7 @@ How to read this:
 - Auth: SCRAM-SHA-256, MD5, cleartext (all three covered by integration tests). There is no channel binding (`SCRAM-SHA-256-PLUS`), GSSAPI or client certificates.
 - Parameters use server-side type inference. If a type is ambiguous (`SELECT $1`), you get text, or a `42P18` error; cast with `$1::int`.
 - Arrays, ranges, intervals etc. come back as PostgreSQL text strings.
-- `exec` returns no rows, so use `query` for `RETURNING`, and note that `query` is read-only. For v0.0.1, `INSERT … RETURNING` reports `rows_affected` only.
+- `exec` returns no rows, so use `query` for `RETURNING`, and note that `query` is read-only. In the CLI, `INSERT … RETURNING` reports `rows_affected` only (the library returns the rows).
 - Not included on purpose: ORM, migrations, a general-purpose pool, schema tools, MCP, interactive shell, COPY, LISTEN/NOTIFY, `database/sql`.
 
 ## Layout

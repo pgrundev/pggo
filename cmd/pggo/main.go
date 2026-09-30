@@ -20,7 +20,7 @@ import (
 	"github.com/pgrundev/pggo/internal/output"
 )
 
-const version = "0.0.1"
+const version = "0.1.0"
 
 const (
 	defaultTimeout    = 10 * time.Second
