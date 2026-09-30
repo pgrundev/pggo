@@ -36,6 +36,37 @@ go install github.com/pgrundev/pggo/cmd/pggo@latest
 go get github.com/pgrundev/pggo@latest
 ```
 
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+
+	"github.com/pgrundev/pggo"
+)
+
+func main() {
+	ctx := context.Background()
+
+	conn, err := pggo.Connect(ctx, os.Getenv("DATABASE_URL"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer conn.Close()
+
+	var n int
+	if err := conn.QueryRow(ctx, "select 1").Scan(&n); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(n) // 1
+}
+```
+
+Coming from pgx? `pgx.Connect` → `pggo.Connect`, `conn.Close(ctx)` → `conn.Close()`; `QueryRow`/`Query`/`Exec`/`Scan` work the same way. See [Go library](#go-library) for transactions, struct scanning and errors.
+
 Requires Go 1.22+. Or download a prebuilt binary (Linux/macOS, amd64/arm64) from [Releases](https://github.com/pgrundev/pggo/releases). Note the org is **`pgrundev`**; `github.com/pgrun/pggo` does not exist.
 
 ---
