@@ -32,7 +32,8 @@ JSON in, JSON out · structured errors · parameterized by default · always bou
 # CLI
 go install github.com/pgrundev/pggo/cmd/pggo@latest
 
-# Go library
+# Go library (run inside your module, i.e. a folder with go.mod;
+# for a new project first: go mod init example.com/myproject)
 go get github.com/pgrundev/pggo@latest
 ```
 
