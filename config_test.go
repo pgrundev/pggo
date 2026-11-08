@@ -1,6 +1,9 @@
 package pggo
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -39,4 +42,49 @@ func FuzzParseConfig(f *testing.F) {
 			t.Fatalf("ParseConfig(%q) accepted invalid config %+v", s, c)
 		}
 	})
+}
+
+// libpq's per-user file: ~/<unix> on Unix, %APPDATA%\postgresql\<windows> on Windows.
+func userFileForTest(t *testing.T, unix, windows string) string {
+	dir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Setenv("APPDATA", dir)
+		os.Mkdir(filepath.Join(dir, "postgresql"), 0o700)
+		return filepath.Join(dir, "postgresql", windows)
+	}
+	t.Setenv("HOME", dir)
+	return filepath.Join(dir, unix)
+}
+
+func TestPassfileLookup(t *testing.T) {
+	c := &Config{Host: "db", Port: 5432, Database: "app", User: "bob"}
+	explicit := filepath.Join(t.TempDir(), "pgpass")
+	os.WriteFile(explicit, []byte("db:5432:app:bob:secret\n"), 0o600)
+	if got := passfileLookup(explicit, c); got != "secret" {
+		t.Errorf("PGPASSFILE: got %q, want secret", got)
+	}
+
+	def := userFileForTest(t, ".pgpass", "pgpass.conf")
+	os.WriteFile(def, []byte("*:*:*:bob:fromdefault\n"), 0o600)
+	if got := passfileLookup("", c); got != "fromdefault" {
+		t.Errorf("default password file %s: got %q", def, got)
+	}
+
+	if runtime.GOOS != "windows" {
+		os.Chmod(explicit, 0o644)
+		if got := passfileLookup(explicit, c); got != "" {
+			t.Errorf("a group/world-readable file must be ignored on Unix, got %q", got)
+		}
+	}
+}
+
+func TestReadServiceDefaultFile(t *testing.T) {
+	t.Setenv("PGSERVICEFILE", "")
+	t.Setenv("PGSYSCONFDIR", "")
+	f := userFileForTest(t, ".pg_service.conf", ".pg_service.conf")
+	os.WriteFile(f, []byte("[svc]\nhost=db\n"), 0o600)
+	p, err := readService("svc")
+	if err != nil || p["host"] != "db" {
+		t.Fatalf("per-user service file %s: %v %v", f, p, err)
+	}
 }
