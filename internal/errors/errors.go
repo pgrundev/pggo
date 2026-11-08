@@ -12,11 +12,22 @@ import (
 	"io"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"syscall"
 
 	"github.com/pgrundev/pggo"
 )
+
+// wsaeconnrefused is Windows' refused-connection errno; syscall has no name for it.
+const wsaeconnrefused syscall.Errno = 10061
+
+// Refused reports whether err is a refused connection, on any OS.
+func Refused(err error) bool {
+	var errno syscall.Errno
+	return stderrors.Is(err, syscall.ECONNREFUSED) ||
+		(runtime.GOOS == "windows" && stderrors.As(err, &errno) && errno == wsaeconnrefused)
+}
 
 // Error types. This set is part of the public contract; do not rename.
 const (
@@ -109,7 +120,7 @@ func Classify(err error) *Error {
 	if stderrors.Is(err, os.ErrDeadlineExceeded) || (stderrors.As(err, &ne) && ne.Timeout()) {
 		return New(Timeout, "operation timed out")
 	}
-	if stderrors.Is(err, syscall.ECONNREFUSED) {
+	if Refused(err) {
 		return New(Connection, "connection refused: %v", err)
 	}
 	var dnsErr *net.DNSError

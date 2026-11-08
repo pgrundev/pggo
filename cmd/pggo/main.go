@@ -144,6 +144,9 @@ func describe(err error, o *options) error {
 		for u := errors.Unwrap(cause); u != nil; u = errors.Unwrap(cause) {
 			cause = u
 		}
+		if perr.Refused(err) {
+			cause = errors.New("connection refused") // Windows words it differently
+		}
 		e.Message = fmt.Sprintf("could not connect to %s: %v", ce.Addr, cause)
 	}
 	return e
