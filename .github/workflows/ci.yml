@@ -41,3 +41,43 @@ jobs:
           cache: false # zero dependencies, nothing to cache
       - name: Integration tests on PostgreSQL ${{ matrix.postgres }}
         run: scripts/test-matrix.sh ${{ matrix.postgres }}
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash # pwsh only fails a step on its last command
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false # zero dependencies, nothing to cache
+      - run: go vet ./...
+      - run: go test -count=1 . ./internal/... ./cmd/...
+      # The runner ships a PostgreSQL (stopped). Set it up the way scripts/pg-up.sh
+      # sets up the container: TLS on, a pggo superuser, md5/cleartext roles.
+      - name: Start PostgreSQL
+        env:
+          MSYS_NO_PATHCONV: "1"
+        run: |
+          d=$(cygpath -m "$PGDATA") # C:/... works for bash and for native openssl
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=localhost" \
+            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+            -keyout "$d/server.key" -out "$d/server.crt"
+          echo "ssl = on" >> "$d/postgresql.conf"
+          { printf 'host all md5user all md5\nhost all cleartextuser all password\n'; cat "$d/pg_hba.conf"; } > "$d/hba.tmp"
+          mv "$d/hba.tmp" "$d/pg_hba.conf"
+          v=$(basename "$(cygpath "$PGROOT")") # major version, so this survives image upgrades
+          pwsh -c "Get-Service postgresql*-$v | Set-Service -StartupType Manual -PassThru | Start-Service"
+          PGPASSWORD=root "$(cygpath "$PGBIN")/psql" -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE pggo SUPERUSER LOGIN PASSWORD 'pggo'" \
+            -c "CREATE DATABASE pggo OWNER pggo ENCODING 'UTF8' LOCALE 'C' TEMPLATE template0"
+          echo "PGGO_TEST_SSLROOTCERT=$PGDATA\server.crt" >> "$GITHUB_ENV"
+      - name: Integration tests on the runner's PostgreSQL
+        env:
+          PGGO_TEST_URL: postgres://pggo:pggo@127.0.0.1:5432/pggo?sslmode=disable
+          PGGO_TEST_AUTH: "1"
+        run: |
+          go test -count=1 -run Lib .
+          go test -count=1 ./integration/
