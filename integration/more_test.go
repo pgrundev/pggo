@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -239,7 +240,11 @@ func TestManyParamsAndColumns(t *testing.T) {
 }
 
 func TestParamRoundTrip(t *testing.T) {
-	values := []string{"", " ", "multi\nline\ttab", `quote ' double " backslash \`, "unicode é 日本 🐘", "$1", "-- not a comment", "'; DROP TABLE x; --", strings.Repeat("long", 10000)}
+	long := strings.Repeat("long", 10000)
+	if runtime.GOOS == "windows" {
+		long = long[:28000] // a Windows command line is capped at 32,767 chars
+	}
+	values := []string{"", " ", "multi\nline\ttab", `quote ' double " backslash \`, "unicode é 日本 🐘", "$1", "-- not a comment", "'; DROP TABLE x; --", long}
 	for _, v := range values {
 		if got := one(t, "SELECT $1::text AS v", v); got != v {
 			t.Fatalf("round trip of %.40q: got %.40q", v, got)

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -60,7 +61,8 @@ var ignoredParams = map[string]bool{
 // fields come from the libpq environment (PGHOST, PGPORT, PGUSER, PGPASSWORD,
 // PGDATABASE, PGSSLMODE, PGSSLROOTCERT), a connection service file
 // (service=name or PGSERVICE; PGSERVICEFILE or ~/.pg_service.conf), and the
-// password file (PGPASSFILE or ~/.pgpass), in libpq's precedence order.
+// password file (PGPASSFILE or ~/.pgpass), in libpq's precedence order. On
+// Windows the per-user files are %APPDATA%\postgresql\.pg_service.conf and pgpass.conf.
 func ParseConfig(connString string) (*Config, error) {
 	kv, err := parseConnString(connString)
 	if err != nil {
@@ -214,16 +216,32 @@ func parseConnString(s string) (map[string]string, error) {
 	return kv, nil
 }
 
+// userFile is libpq's per-user file: ~/<unix>, or %APPDATA%\postgresql\<windows> on Windows.
+func userFile(unix, windows string) string {
+	if runtime.GOOS == "windows" {
+		d, err := os.UserConfigDir() // %AppData%
+		if err != nil {
+			return ""
+		}
+		return filepath.Join(d, "postgresql", windows)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, unix)
+}
+
 // readService returns the parameters of [name] from the connection service
-// file: PGSERVICEFILE, else ~/.pg_service.conf, else $PGSYSCONFDIR/pg_service.conf.
+// file: PGSERVICEFILE, else the per-user file, else $PGSYSCONFDIR/pg_service.conf.
 // An unknown service is an error, as in libpq.
 func readService(name string) (map[string]string, error) {
 	var files []string
 	if f := os.Getenv("PGSERVICEFILE"); f != "" {
 		files = []string{f}
 	} else {
-		if home, err := os.UserHomeDir(); err == nil {
-			files = append(files, filepath.Join(home, ".pg_service.conf"))
+		if f := userFile(".pg_service.conf", ".pg_service.conf"); f != "" {
+			files = append(files, f)
 		}
 		if d := os.Getenv("PGSYSCONFDIR"); d != "" {
 			files = append(files, filepath.Join(d, "pg_service.conf"))
@@ -279,14 +297,13 @@ func scanServiceFile(f *os.File, name string) (map[string]string, bool, error) {
 // (hostname:port:database:username:password, * wildcards, \ escapes).
 func passfileLookup(path string, c *Config) string {
 	if path == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
+		if path = userFile(".pgpass", "pgpass.conf"); path == "" {
 			return ""
 		}
-		path = filepath.Join(home, ".pgpass")
 	}
 	st, err := os.Stat(path)
-	if err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0o077 != 0 {
+	// Windows has no group/other bits (every writable file reads 0666); libpq skips the check there.
+	if err != nil || !st.Mode().IsRegular() || (runtime.GOOS != "windows" && st.Mode().Perm()&0o077 != 0) {
 		return "" // libpq ignores a password file readable by group/others
 	}
 	f, err := os.Open(path)

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -104,5 +105,21 @@ func TestErrorString(t *testing.T) {
 	}
 	if s := New(Timeout, "slow").Error(); s != "timeout: slow" {
 		t.Fatal(s)
+	}
+}
+
+// A real refused dial: Windows reports WSAECONNREFUSED, which is not syscall.ECONNREFUSED.
+func TestClassifyRefusedDial(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+	if _, err = net.Dial("tcp", addr); err == nil {
+		t.Skip("port was reused")
+	}
+	if e := Classify(err); e.Type != Connection || !strings.Contains(e.Message, "connection refused") {
+		t.Errorf("Classify(%v) = %s %q, want a connection refused message", err, e.Type, e.Message)
 	}
 }

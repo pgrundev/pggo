@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -728,7 +729,10 @@ func TestLibServiceFileAndPassfile(t *testing.T) {
 	if _, err := ParseConfig("service=missing"); err == nil {
 		t.Fatal("unknown service must fail")
 	}
-	// A world-readable passfile is ignored, as in libpq.
+	// A world-readable passfile is ignored, as in libpq (which skips the check on Windows).
+	if runtime.GOOS == "windows" {
+		return
+	}
 	os.Chmod(pass, 0o644)
 	cfg, _ := ParseConfig("service=lib")
 	if cfg.Password != "" {
