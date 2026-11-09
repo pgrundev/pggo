@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -43,6 +44,9 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	bin = filepath.Join(dir, "pggo")
+	if runtime.GOOS == "windows" {
+		bin += ".exe" // exec won't run it otherwise
+	}
 	out, err := exec.Command("go", "build", "-o", bin, "../cmd/pggo").CombinedOutput()
 	if err != nil {
 		fmt.Printf("build failed: %v\n%s", err, out)
@@ -63,7 +67,8 @@ type response struct {
 func pggo(t *testing.T, args ...string) response {
 	t.Helper()
 	cmd := exec.Command(bin, args...)
-	cmd.Env = append(os.Environ(), "DATABASE_URL=")
+	// The Windows runner image exports PGPASSWORD machine-wide.
+	cmd.Env = append(os.Environ(), "DATABASE_URL=", "PGPASSWORD=")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
